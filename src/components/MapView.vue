@@ -120,7 +120,7 @@ export default {
       this.saveToLocalStorage();
     },
     loadVillageLayer() {
-      fetch('/villages.geojson')
+      fetch('./villages.geojson')
         .then((res) => res.json())
         .then((data) => {
           // 建立 polygon 層，但先不加到地圖上
