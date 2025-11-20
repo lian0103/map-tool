@@ -2,7 +2,7 @@
   <div id="map"></div>
 
   <!-- 右側控制面板 -->
-  <div class="control-panel">
+  <div class="control-panel" :class="{ 'closed-mobile': !controlOpenMobile }">
     <h3>Marker 編輯</h3>
     <div v-if="selectedMarker">
       <label>標記類型</label>
@@ -59,11 +59,40 @@
         />
         顯示各里邊界
       </label>
+
+      <!-- 資料集切換 -->
+      <div style="margin-top:8px;">
+        <label>資料集</label>
+        <select v-model="currentDataset" @change="changeDataset">
+          <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.label }}</option>
+        </select>
+      </div>
+
+      <!-- 行政區下拉多選 -->
+      <div style="margin-top:6px;">
+        <label>選擇行政區（可多選）</label>
+        <div class="district-list">
+          <div class="district-item" v-for="d in districts" :key="d">
+            <label>
+              <input
+                type="checkbox"
+                :value="d"
+                v-model="selectedDistricts"
+                @change="createVillageLayer"
+              />
+              <span class="district-name">{{ d }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <button @click="undoLastPoint">撤銷最後一點</button>
     <button @click="clearRoute">清空路線</button>
   </div>
+
+  <!-- 手機尺寸的切換按鈕 -->
+  <button class="control-toggle" @click="toggleControl" aria-label="切換控制面板">☰</button>
 </template>
 
 <script>
@@ -89,14 +118,48 @@ export default {
       },
       showVillages: false,
       villageLayer: null,
+      villageGeojson: null,
+      villageLabels: [],
+      districts: [],
+      selectedDistricts: [],
+      // dataset control
+      datasets: [
+        { id: 'newtaipei', label: '新北市', file: './newTaipeiCity_village.json' },
+        { id: 'taoyuan', label: '桃園市', file: './taoyuan_village.json' },
+      ],
+      currentDataset: 'newtaipei',
+      controlOpenMobile: true,
     };
   },
   mounted() {
     this.initMap();
     this.loadFromLocalStorage();
-    this.loadVillageLayer();
+    this.loadVillageLayer(this.currentDataset);
   },
   methods: {
+    toggleControl() {
+      this.controlOpenMobile = !this.controlOpenMobile;
+    },
+    changeDataset() {
+      // 移除現有圖層與標籤，清空選取，並載入新資料集
+      if (this.villageLayer) {
+        try {
+          this.map.removeLayer(this.villageLayer);
+        } catch (e) {}
+        this.villageLayer = null;
+      }
+      if (this.villageLabels && this.villageLabels.length) {
+        this.villageLabels.forEach((l) => {
+          try {
+            this.map.removeLayer(l);
+          } catch (e) {}
+        });
+      }
+      this.villageLabels = [];
+      this.selectedDistricts = [];
+      this.loadVillageLayer(this.currentDataset);
+    },
+
     initMap() {
       this.map = L.map('map').setView([24.958, 121.403], 12);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -119,40 +182,94 @@ export default {
       }
       this.saveToLocalStorage();
     },
-    loadVillageLayer() {
-      fetch('./villages.geojson')
+    loadVillageLayer(datasetId) {
+      const ds = this.datasets.find((d) => d.id === datasetId) || this.datasets[0];
+      fetch(ds.file)
         .then((res) => res.json())
         .then((data) => {
-          // 建立 polygon 層，但先不加到地圖上
-          this.villageLayer = L.geoJSON(data, {
-            style: {
-              color: '#555',
-              weight: 1,
-              fillColor: '#ffffff',
-              fillOpacity: 0.3,
-            },
+          // 儲存原始 geojson
+          this.villageGeojson = data;
+
+          // Normalization: 將不同來源可能的屬性統一成 __district / __village
+          data.features.forEach((f) => {
+            const p = f.properties || {};
+            p.__district = p.ADMIT || p.TOWNNAME || p.TOWN || p.COUNTY || p.CITY || p.COUNTYNAME || null;
+            p.__village = p.ADMIV || p.VILLNAME || p.T_NAME || p.NAME || null;
+            f.properties = p;
           });
 
-          // 建立里名 label
-          this.villageLabels = [];
-          data.features.forEach((feature) => {
-            const latlng = this.getPolygonCentroid(feature.geometry);
-            const label = L.marker(latlng, {
-              icon: L.divIcon({
-                className: 'village-label',
-                html: feature.properties.ADMIV,
-                iconSize: [70, 20],
-                iconAnchor: [35, 10],
-              }),
-              interactive: false,
-            });
-            this.villageLabels.push(label);
+          // 建立行政區清單，但先不加到地圖上
+          const admits = new Set();
+          data.features.forEach((f) => {
+            if (f.properties && f.properties.__district) admits.add(f.properties.__district);
           });
+          this.districts = Array.from(admits).sort();
 
-          // 初始顯示
+          // 預設不選任何行政區
+          this.selectedDistricts = [];
+
+          // 建立初始圖層（依 selectedDistricts）
+          this.createVillageLayer();
           if (this.showVillages) this.toggleVillageLayer();
         })
-        .catch((err) => console.error('載入 villages.geojson 失敗', err));
+        .catch((err) => console.error('載入 geojson 失敗', ds.file, err));
+    },
+
+    createVillageLayer() {
+      if (!this.villageGeojson) return;
+
+      // 移除舊的圖層與標籤
+      if (this.villageLayer) {
+        try {
+          this.map.removeLayer(this.villageLayer);
+        } catch (e) {}
+        this.villageLayer = null;
+      }
+      if (this.villageLabels && this.villageLabels.length) {
+        this.villageLabels.forEach((l) => {
+          try {
+            this.map.removeLayer(l);
+          } catch (e) {}
+        });
+      }
+      this.villageLabels = [];
+
+      // 篩選 features
+      const filteredFeatures = this.villageGeojson.features.filter((f) =>
+        this.selectedDistricts.includes(f.properties.__district)
+      );
+
+      const filtered = { ...this.villageGeojson, features: filteredFeatures };
+
+      this.villageLayer = L.geoJSON(filtered, {
+        style: {
+          color: '#555',
+          weight: 1,
+          fillColor: '#ffffff',
+          fillOpacity: 0.3,
+        },
+      });
+
+      // 建立里名 label（只為篩選後的 features）
+      filteredFeatures.forEach((feature) => {
+        const latlng = this.getPolygonCentroid(feature.geometry);
+        const label = L.marker(latlng, {
+          icon: L.divIcon({
+            className: 'village-label',
+            html: feature.properties.__village || feature.properties.ADMIV || '',
+            iconSize: [70, 20],
+            iconAnchor: [35, 10],
+          }),
+          interactive: false,
+        });
+        this.villageLabels.push(label);
+      });
+
+      // 若目前設定為顯示，加入地圖
+      if (this.showVillages) {
+        this.villageLayer.addTo(this.map);
+        this.villageLabels.forEach((l) => l.addTo(this.map));
+      }
     },
 
     toggleVillageLayer() {
@@ -322,6 +439,12 @@ export default {
       }
     },
   },
+  watch: {
+    selectedDistricts() {
+      // 當選取行政區改變且圖層已顯示時，重新建立圖層
+      if (this.showVillages) this.createVillageLayer();
+    },
+  },
 };
 </script>
 
@@ -356,5 +479,71 @@ export default {
   text-align: center;
   white-space: nowrap;
   pointer-events: none; /* 不攔截滑鼠事件 */
+}
+
+/* 手機響應式 */
+.control-toggle {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .control-panel {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: 10px;
+    width: auto;
+    max-height: 50vh;
+    overflow: auto;
+    padding: 8px;
+    font-size: 14px;
+  }
+
+  .control-panel.closed-mobile {
+    display: none;
+  }
+
+  .control-toggle {
+    display: block;
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1100;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    font-size: 18px;
+  }
+
+  /* 讓 select 在多選時更好操作 */
+  .control-panel select[multiple] {
+    height: 120px;
+  }
+}
+
+.district-list {
+  border: 1px solid #e6e6e6;
+  border-radius: 4px;
+  padding: 6px;
+  max-height: 140px;
+  overflow: auto;
+  background: #fafafa;
+}
+.district-item {
+  padding: 4px 2px;
+}
+.district-item label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: 40px;
+}
+.district-name {
+  flex: 1;
+  white-space: nowrap;
 }
 </style>
