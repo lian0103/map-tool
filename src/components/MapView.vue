@@ -46,8 +46,35 @@
     <p v-else>點擊 Marker 以編輯</p>
 
     <hr />
-    <label>路線顏色</label>
-    <input type="color" v-model="routeColor" @input="updateRouteColor" />
+    <div class="color-row">
+      <label class="color-label">路線顏色</label>
+      <div class="color-options" role="radiogroup" aria-label="路線顏色選擇">
+        <button
+          type="button"
+          class="color-option red"
+          :class="{ active: routeColor === '#ff0000' }"
+          :aria-pressed="routeColor === '#ff0000'"
+          @click="setRouteColor('#ff0000')"
+          title="紅"
+        ></button>
+        <button
+          type="button"
+          class="color-option black"
+          :class="{ active: routeColor === '#000000' }"
+          :aria-pressed="routeColor === '#000000'"
+          @click="setRouteColor('#000000')"
+          title="黑"
+        ></button>
+        <button
+          type="button"
+          class="color-option blue"
+          :class="{ active: routeColor === '#0000ff' }"
+          :aria-pressed="routeColor === '#0000ff'"
+          @click="setRouteColor('#0000ff')"
+          title="藍"
+        ></button>
+      </div>
+    </div>
 
     <hr />
     <div>
@@ -68,11 +95,15 @@
         </select>
       </div>
 
-      <!-- 行政區下拉多選 -->
-      <div style="margin-top:6px;">
+      <!-- 行政區選項：直接列出所有選項（兩欄）, 隱藏 checkbox，點文字選取顯示底色 -->
+      <div class="district-container" style="margin-top:6px;">
         <label>選擇行政區（可多選）</label>
         <div class="district-list">
-          <div class="district-item" v-for="d in districts" :key="d">
+          <div
+            class="district-item"
+            v-for="d in districts"
+            :key="d"
+          >
             <label>
               <input
                 type="checkbox"
@@ -405,6 +436,11 @@ export default {
       this.saveToLocalStorage();
     },
 
+    setRouteColor(color) {
+      this.routeColor = color;
+      this.updateRouteColor();
+    },
+
     saveToLocalStorage() {
       const data = {
         routePoints: this.routePoints,
@@ -528,22 +564,52 @@ export default {
   border: 1px solid #e6e6e6;
   border-radius: 4px;
   padding: 6px;
-  max-height: 140px;
-  overflow: auto;
   background: #fafafa;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 200px;
+  overflow: auto;
 }
 .district-item {
-  padding: 4px 2px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  flex: 0 0 calc(50% - 8px);
 }
 .district-item label {
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  width: 40px;
+}
+.district-item input {
+  /* keep checkbox visible and accessible */
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
 }
 .district-name {
-  flex: 1;
+  display: inline-block;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* color buttons */
+.color-row { display:flex; align-items:center; gap:8px; margin:6px 0 10px; }
+.color-label { flex:0 0 auto; }
+.color-options { display:flex; gap:8px; }
+.color-option { width:36px; height:28px; border-radius:6px; border:1px solid #ccc; padding:0; cursor:pointer; }
+.color-option.red { background:#ff0000 }
+.color-option.black { background:#000000 }
+.color-option.blue { background:#0000ff }
+.color-option.active { outline:2px solid rgba(0,0,0,0.12); transform:scale(1.02); }
+
+@media (max-width:480px) {
+  .district-item { flex: 0 0 100%; }
+  .color-option { width:34px; height:26px }
 }
 </style>
